@@ -10,7 +10,7 @@
 - Integration tests use a mock signal-cli daemon and should not require a real Signal account.
 
 ## Local deployment context
-- Six packages this API together with signal-cli for `mikesimone/signal-forwarder`.
+- Used in production behind a Signal forwarding service; several Signal accounts share one daemon, so account-selection semantics matter to callers.
 - Multiple Signal accounts share the production daemon, so account-selection semantics are important to downstream callers.
 
 ## Working rules
