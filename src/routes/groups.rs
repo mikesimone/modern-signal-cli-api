@@ -166,7 +166,7 @@ async fn add_members(
     rpc_ok(&st, "updateGroup", json!({
         "account": number,
         "group-id": groupid,
-        "addMember": body.members,
+        "member": body.members,
     })).await
 }
 
@@ -195,7 +195,7 @@ async fn add_admins(
     rpc_ok(&st, "updateGroup", json!({
         "account": number,
         "group-id": groupid,
-        "addAdmin": body.admins,
+        "admin": body.admins,
     })).await
 }
 

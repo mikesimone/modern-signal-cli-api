@@ -36,6 +36,23 @@ async fn start_mock_signal_cli(captured: Arc<tokio::sync::Mutex<Vec<serde_json::
                         "params": req.get("params").cloned().unwrap_or(serde_json::json!({})),
                     }));
 
+                    // Contract testing (contract/run.sh): when CONTRACT_CAPTURE names a file, append one JSON line
+                    // per request - the method and the param NAMES our routes sent - so contract/check.py can
+                    // compare them with what the real, pinned signal-cli accepts.
+                    if let Ok(path) = std::env::var("CONTRACT_CAPTURE") {
+                        use std::io::Write;
+                        let mut keys: Vec<String> = req
+                            .get("params")
+                            .and_then(|p| p.as_object())
+                            .map(|o| o.keys().cloned().collect())
+                            .unwrap_or_default();
+                        keys.sort();
+                        let line = serde_json::json!({"method": method, "params": keys}).to_string() + "\n";
+                        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                            let _ = f.write_all(line.as_bytes());
+                        }
+                    }
+
                     // Special: return a JSON-RPC error for "simulateError"
                     // OR when account/number is "+ERROR" (triggers error path on any endpoint)
                     let params = req.get("params");
@@ -4508,4 +4525,21 @@ async fn test_attachments_get_account_query_selects_account() {
     assert_get(&base, "/v1/attachments/needs-account", 400).await;
     let body = assert_get(&base, "/v1/attachments/needs-account?account=%2B123", 200).await.unwrap();
     assert_eq!(body["id"], "att1");
+}
+
+#[tokio::test]
+async fn test_group_add_members_and_admins_use_signal_cli_param_names() {
+    // signal-cli's updateGroup options are --member / --admin; the route used to send addMember / addAdmin,
+    // which signal-cli silently ignores, so adding members or admins did nothing (found by contract/check.py).
+    let harness = setup_full().await;
+    let client = reqwest::Client::new();
+    for (path, body) in [("members", serde_json::json!({"members": ["+9999"]})), ("admins", serde_json::json!({"admins": ["+9999"]}))] {
+        let res = client.post(format!("{}/v1/groups/+123/g1/{path}", harness.base_url)).json(&body).send().await.unwrap();
+        assert!(res.status().is_success(), "{path}: {}", res.status());
+    }
+    let calls = harness.captured_rpc_calls.lock().await;
+    let updates: Vec<_> = calls.iter().filter(|c| c["method"] == "updateGroup").collect();
+    assert!(updates.iter().any(|c| c["params"]["member"] == serde_json::json!(["+9999"])));
+    assert!(updates.iter().any(|c| c["params"]["admin"] == serde_json::json!(["+9999"])));
+    assert!(updates.iter().all(|c| c["params"].get("addMember").is_none() && c["params"].get("addAdmin").is_none()));
 }

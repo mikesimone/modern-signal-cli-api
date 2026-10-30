@@ -12,6 +12,18 @@ The binary is `modern-signal-cli-api`; it replaces `signal-cli-api` (same flags,
 
 ---
 
+## Contract tests
+
+The test-suite talks to a *fake* signal-cli, which accepts anything. `contract/run.sh` checks our routes against the
+**real** one instead: it reads every JSON-RPC method and parameter name from the pinned signal-cli in the image
+(`contract/SpecDump.java`), records every call our tests make (`CONTRACT_CAPTURE`), and fails if a route calls a
+method signal-cli does not have or sends a parameter name it does not read (`contract/check.py`). That second case
+is the dangerous one: signal-cli silently ignores unknown parameters, so a typo does nothing and no error appears.
+Known exceptions are listed, with reasons, in `contract/known-gaps.txt` (the list can only shrink: stale entries
+fail too). **After bumping `SIGNAL_CLI_VERSION` in the Dockerfile, run `contract/run.sh` before merging.**
+
+---
+
 # signal-cli-api
 
 A native REST + WebSocket API for [signal-cli](https://github.com/AsamK/signal-cli). Build Signal bots, notification systems, and integrations in any language.

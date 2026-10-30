@@ -1,0 +1,38 @@
+# Calls our test-suite makes that the real signal-cli would not honour, each with the reason it is accepted for now.
+# One `method` (signal-cli has no such method) or `method:param` (param is silently ignored/rejected) per line.
+# check.py fails on anything NOT listed here, and on entries here that no longer occur - so this can only shrink.
+
+# --- routes with no signal-cli equivalent: they always return an error ---
+deleteAttachment
+listAttachments
+getConfiguration
+setConfiguration
+getAccountSettings
+setAccountSettings
+
+# --- joinGroup needs a group invite `uri`; the route has only a group id, so it cannot work ---
+joinGroup:group-id
+
+# --- bbernhard-style request bodies are forwarded untouched (route = body + account), but signal-cli's names differ:
+#     reaction->emoji, target_author->targetAuthor, timestamp->targetTimestamp, receipt_type->type.
+#     Callers must send signal-cli's names until a translation layer exists (see README "Known gaps"). ---
+remoteDelete:timestamp
+sendReaction:reaction
+sendReaction:target_author
+sendReaction:timestamp
+sendReceipt:group-id
+sendReceipt:receipt_type
+sendReceipt:timestamp
+
+# --- /v2/send is a deliberate pure passthrough: these fields come from the tests, which check that unknown or
+#     bbernhard-style fields are forwarded verbatim. They are not what our code generates. ---
+send:number
+send:base64_attachments
+send:quote_timestamp
+send:quote_author
+send:quote_message
+send:somethingSignalCliMightAddTomorrow
+
+# --- signal-cli's startLink takes no params (the device name is given later, to finishLink): the qrcodelink
+#     route's device_name is accepted for compatibility but has no effect ---
+startLink:deviceName
