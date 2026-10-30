@@ -26,6 +26,13 @@ async fn send_receipt(
 ) -> Response {
     let mut params = body;
     translate_legacy_params(&mut params, LEGACY);
+    // Receipts go to a person; signal-cli's sendReceipt has no group parameter. Drop one a caller sent
+    // (bbernhard-style bodies include it) rather than forward a field signal-cli would silently ignore.
+    if let Some(obj) = params.as_object_mut() {
+        obj.remove("group-id");
+        obj.remove("groupId");
+        obj.remove("group_id");
+    }
     params["account"] = json!(number);
     rpc_ok(&st, "sendReceipt", params).await
 }

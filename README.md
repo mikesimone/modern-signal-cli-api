@@ -255,7 +255,7 @@ INFO rpc_method="send" status=201 latency_ms=1150
 | DELETE | `/v1/groups/{number}/{groupid}/members` | Remove members |
 | POST | `/v1/groups/{number}/{groupid}/admins` | Add admins |
 | DELETE | `/v1/groups/{number}/{groupid}/admins` | Remove admins |
-| POST | `/v1/groups/{number}/{groupid}/join` | Join group |
+| POST | `/v1/groups/{number}/join` (also `/{groupid}/join`) | Join a group by invite link: body `{"uri": "https://signal.group/#..."}` (signal-cli cannot join by group id; without `uri` you get a 400 saying so) |
 | POST | `/v1/groups/{number}/{groupid}/quit` | Quit group |
 | POST | `/v1/groups/{number}/{groupid}/block` | Block group |
 | GET | `/v1/groups/{number}/{groupid}/avatar` | Get group avatar |
@@ -303,7 +303,7 @@ INFO rpc_method="send" status=201 latency_ms=1150
 | DELETE | `/v1/devices/{number}/{device_id}` | Remove device |
 | DELETE | `/v1/devices/{number}/local-data` | Delete local data |
 | POST | `/v1/devices/{number}/add` | Approve linking a new device (primary device only) |
-| GET | `/v1/qrcodelink` | QR code link URI |
+| GET | `/v1/qrcodelink` | QR code link URI (`?device_name=` is remembered and used when you finish the link with `POST /v1/devices/{number}`, since signal-cli only takes the name then) |
 | GET | `/v1/qrcodelink/raw` | Raw link URI |
 
 ### Identities & Profiles
@@ -343,9 +343,9 @@ INFO rpc_method="send" status=201 latency_ms=1150
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/v1/attachments` | ⚠️ Broken - `listAttachments` isn't a real signal-cli RPC method, see `src/routes/attachments.rs` |
+| GET | `/v1/attachments` | List stored attachments `[{id, size, modified}]` (built in: signal-cli has no such method yet) |
 | GET | `/v1/attachments/{id}` | Get attachment (`?account=+1555...` selects the account when several are registered) |
-| DELETE | `/v1/attachments/{id}` | ⚠️ Broken - `deleteAttachment` isn't a real signal-cli RPC method, see `src/routes/attachments.rs` |
+| DELETE | `/v1/attachments/{id}` | Delete a stored attachment, 204 or 404 (built in: signal-cli has no such method yet) |
 | GET | `/v1/search/{number}?numbers=+111,+222` | Check registration status |
 
 ### Webhooks
@@ -367,14 +367,26 @@ INFO rpc_method="send" status=201 latency_ms=1150
 | GET | `/v1/events/{number}` | SSE stream |
 | GET | `/metrics` | Prometheus metrics |
 
-`GET/POST /v1/configuration` and `GET/POST /v1/configuration/{number}/settings`
-also exist but are **broken** - they call `getConfiguration`/
-`setConfiguration`/`getAccountSettings`/`setAccountSettings`, none of which
-are real signal-cli JSON-RPC methods (`getConfiguration`/`setConfiguration`
-only exist on signal-cli's D-Bus interface; the account-settings pair don't
-exist anywhere in signal-cli). See `src/routes/config.rs` for the full
-explanation and what real signal-cli capability (`updateConfiguration`) this
-would need to be rebuilt around.
+### Configuration and settings
+
+signal-cli has no getter or setter for configuration over JSON-RPC, so these are built from what it does have:
+
+- `POST /v1/configuration/{number}/settings` applies settings through signal-cli's real `updateConfiguration`
+  (`readReceipts`, `typingIndicators`, `linkPreviews`, `unidentifiedDeliveryIndicators`) and `updateAccount`
+  (`deviceName`, `numberSharing`, `discoverableByNumber`, `unrestrictedUnidentifiedSender`, `username`,
+  `deleteUsername`). `snake_case` names work too. Anything else is a 400 listing what is supported.
+- `GET /v1/configuration/{number}/settings` returns what was last set *through this API* (signal-cli cannot report
+  its settings back), kept in `modern-signal-cli-api-settings.json` in signal-cli's data directory.
+- `GET /v1/configuration` returns `{trustMode, signalCli: {version}}`. The trust mode is a daemon start-up flag, so
+  `POST` only accepts the value already in force and answers 501 otherwise.
+
+## Routes signal-cli lacks (and how they switch over later)
+
+A few routes have no signal-cli method behind them yet (attachment list/delete, the configuration getters and
+setters). Each one asks signal-cli first; if it answers "Method not implemented" the route runs the built-in version
+in `src/native.rs`. When a newer signal-cli adds the method, the route starts using it with no code change, and
+`contract/run.sh` fails with a stale `contract/known-gaps.txt` entry: that is the cue to check the route's
+parameters against the new method and delete the entry.
 
 ## Building from source
 

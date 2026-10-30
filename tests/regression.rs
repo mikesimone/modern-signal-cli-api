@@ -86,6 +86,23 @@ async fn start_mock_signal_cli(captured: Arc<tokio::sync::Mutex<Vec<serde_json::
                                     || o.keys().any(|k| k != "deviceLinkUri" && k != "deviceName")
                             })
                             .unwrap_or(true);
+                    // Real signal-cli (0.14.9) does not implement these; the API falls back to its own code.
+                    if matches!(
+                        method,
+                        "listAttachments" | "deleteAttachment" | "getConfiguration" | "setConfiguration"
+                            | "getAccountSettings" | "setAccountSettings"
+                    ) {
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {"code": -32601, "message": "Method not implemented"},
+                            "id": id
+                        });
+                        let mut resp_line = serde_json::to_string(&response).unwrap();
+                        resp_line.push('\n');
+                        let _ = writer.write_all(resp_line.as_bytes()).await;
+                        let _ = writer.flush().await;
+                        continue;
+                    }
                     if needs_account || bad_finish_link {
                         let (code, msg) = if needs_account {
                             (-32602, "Method requires valid account parameter")
@@ -265,6 +282,8 @@ struct TestHarness {
     metrics: Arc<modern_signal_cli_api::state::Metrics>,
     /// Every {method, params} pair the mock signal-cli received, in order.
     captured_rpc_calls: Arc<tokio::sync::Mutex<Vec<serde_json::Value>>>,
+    /// This harness's own signal-cli data dir (attachments, remembered settings).
+    data_dir: std::path::PathBuf,
 }
 
 /// Connect to the mock signal-cli, build AppState, spawn the reader loop,
@@ -278,7 +297,15 @@ async fn setup_full() -> TestHarness {
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<String>(256);
     tokio::spawn(modern_signal_cli_api::jsonrpc::writer_loop(writer_rx, writer));
 
-    let state = modern_signal_cli_api::state::AppState::new(writer_tx);
+    let mut state = modern_signal_cli_api::state::AppState::new(writer_tx);
+    static DIRS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let data_dir = std::env::temp_dir().join(format!(
+        "msca-test-{}-{}",
+        std::process::id(),
+        DIRS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(data_dir.join("attachments")).unwrap();
+    state.data_dir = data_dir.clone();
 
     let broadcast_tx = state.broadcast_tx.clone();
     let pending = state.pending.clone();
@@ -301,6 +328,7 @@ async fn setup_full() -> TestHarness {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     TestHarness {
+        data_dir,
         base_url: format!("http://{addr}"),
         broadcast_tx,
         metrics,
@@ -701,12 +729,6 @@ async fn test_groups_remove_admins() {
 }
 
 #[tokio::test]
-async fn test_groups_join() {
-    let base = setup().await;
-    assert_no_body_request(&base, "POST", "/v1/groups/+123/g1/join", 200).await;
-}
-
-#[tokio::test]
 async fn test_groups_quit() {
     let base = setup().await;
     assert_no_body_request(&base, "POST", "/v1/groups/+123/g1/quit", 200).await;
@@ -992,15 +1014,6 @@ async fn test_devices_delete_local_data() {
 // ===========================================================================
 
 #[tokio::test]
-async fn test_attachments_list() {
-    let base = setup().await;
-    let body = assert_get(&base, "/v1/attachments", 200).await.unwrap();
-    let attachments = body.as_array().unwrap();
-    assert!(!attachments.is_empty());
-    assert_eq!(attachments[0]["filename"], "photo.jpg");
-}
-
-#[tokio::test]
 async fn test_attachments_get() {
     let base = setup().await;
     let body = assert_get(&base, "/v1/attachments/att1", 200).await.unwrap();
@@ -1008,41 +1021,9 @@ async fn test_attachments_get() {
     assert_eq!(body["size"], 12345);
 }
 
-#[tokio::test]
-async fn test_attachments_delete() {
-    let base = setup().await;
-    assert_no_body_request(&base, "DELETE", "/v1/attachments/att1", 204).await;
-}
-
 // ===========================================================================
 // Configuration — global + per-account
 // ===========================================================================
-
-#[tokio::test]
-async fn test_config_get_global() {
-    let base = setup().await;
-    let body = assert_get(&base, "/v1/configuration", 200).await.unwrap();
-    assert_eq!(body["trustMode"], "always");
-}
-
-#[tokio::test]
-async fn test_config_set_global() {
-    let base = setup().await;
-    assert_json_request(&base, "POST", "/v1/configuration", serde_json::json!({"trustMode": "always"}), 204).await;
-}
-
-#[tokio::test]
-async fn test_config_get_account() {
-    let base = setup().await;
-    let body = assert_get(&base, "/v1/configuration/+123/settings", 200).await.unwrap();
-    assert_eq!(body["trustMode"], "on-first-use");
-}
-
-#[tokio::test]
-async fn test_config_set_account() {
-    let base = setup().await;
-    assert_json_request(&base, "POST", "/v1/configuration/+123/settings", serde_json::json!({"trustMode": "always"}), 204).await;
-}
 
 // ===========================================================================
 // Stickers — list + install
@@ -2152,12 +2133,6 @@ async fn test_stickers_list_rpc_error() {
 }
 
 #[tokio::test]
-async fn test_config_get_account_rpc_error() {
-    let base = setup().await;
-    assert_get(&base, "/v1/configuration/+ERROR/settings", 400).await;
-}
-
-#[tokio::test]
 async fn test_profiles_update_rpc_error() {
     let base = setup().await;
     assert_json_request(&base, "PUT", "/v1/profiles/+ERROR", serde_json::json!({"name": "Fail"}), 400).await;
@@ -2737,26 +2712,6 @@ async fn test_groups_add_and_remove_members() {
     let res = client
         .delete(format!("{base}/v1/groups/+123/g1/members"))
         .json(&serde_json::json!({"members": ["+111", "+222"]}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-}
-
-#[tokio::test]
-async fn test_groups_join_then_quit() {
-    let base = setup().await;
-    let client = reqwest::Client::new();
-
-    let res = client
-        .post(format!("{base}/v1/groups/+123/g1/join"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let res = client
-        .post(format!("{base}/v1/groups/+123/g1/quit"))
         .send()
         .await
         .unwrap();
@@ -3894,12 +3849,6 @@ async fn test_groups_remove_admins_rpc_error() {
 }
 
 #[tokio::test]
-async fn test_config_set_global_rpc_error() {
-    let base = setup().await;
-    assert_json_request(&base, "POST", "/v1/configuration", serde_json::json!({"account": "+ERROR", "trustMode": "always"}), 400).await;
-}
-
-#[tokio::test]
 async fn test_config_set_account_rpc_error() {
     let base = setup().await;
     assert_json_request(&base, "POST", "/v1/configuration/+ERROR/settings", serde_json::json!({"trustMode": "always"}), 400).await;
@@ -4586,4 +4535,159 @@ async fn test_reactions_receipts_remote_delete_translate_legacy_names() {
     assert!(deletes[0].get("timestamp").is_none());
     assert_eq!(deletes[1]["targetTimestamp"], 4242);
     assert_eq!(deletes[1]["groupId"], "g1");
+}
+
+// ---------------------------------------------------------------------------
+// Routes signal-cli has no method for: real method first, built-in fallback when it says "Method not implemented"
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_attachments_list_and_delete_fall_back_to_the_data_dir() {
+    let h = setup_full().await;
+    let dir = h.data_dir.join("attachments");
+    std::fs::write(dir.join("abc123.jpg"), b"12345").unwrap();
+    std::fs::write(dir.join("def456.mp4"), b"1234567890").unwrap();
+    std::fs::write(dir.join("ghi789.jpg.42.tmp"), b"half-downloaded").unwrap();
+    let c = reqwest::Client::new();
+
+    let list: serde_json::Value = c.get(format!("{}/v1/attachments", h.base_url)).send().await.unwrap().json().await.unwrap();
+    let ids: Vec<_> = list.as_array().unwrap().iter().map(|a| a["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, vec!["abc123.jpg", "def456.mp4"], "in-flight .tmp files are not listed");
+    assert_eq!(list[0]["size"], 5);
+    assert!(list[0]["modified"].as_u64().unwrap() > 0);
+
+    let res = c.delete(format!("{}/v1/attachments/abc123.jpg", h.base_url)).send().await.unwrap();
+    assert_eq!(res.status(), 204);
+    assert!(!dir.join("abc123.jpg").exists());
+    let res = c.delete(format!("{}/v1/attachments/abc123.jpg", h.base_url)).send().await.unwrap();
+    assert_eq!(res.status(), 404, "already gone");
+    // ids that could leave the directory never touch the disk
+    std::fs::write(h.data_dir.join("secret"), b"x").unwrap();
+    for bad in ["..%2Fsecret", ".hidden", "a%2Fb"] {
+        let res = c.delete(format!("{}/v1/attachments/{bad}", h.base_url)).send().await.unwrap();
+        assert_eq!(res.status(), 404, "{bad}");
+    }
+    assert!(h.data_dir.join("secret").exists());
+    // both real methods were tried first
+    let calls = h.captured_rpc_calls.lock().await;
+    assert!(calls.iter().any(|c| c["method"] == "listAttachments"));
+    assert!(calls.iter().any(|c| c["method"] == "deleteAttachment"));
+}
+
+#[tokio::test]
+async fn test_attachments_list_empty_without_directory() {
+    let h = setup_full().await;
+    std::fs::remove_dir_all(h.data_dir.join("attachments")).unwrap();
+    let body = assert_get(&h.base_url, "/v1/attachments", 200).await.unwrap();
+    assert_eq!(body, serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn test_account_settings_post_uses_the_real_methods_and_get_remembers() {
+    let h = setup_full().await;
+    let c = reqwest::Client::new();
+    // empty before anything is set
+    assert_eq!(assert_get(&h.base_url, "/v1/configuration/+123/settings", 200).await.unwrap(), serde_json::json!({}));
+    // snake_case and camelCase both accepted; split across updateConfiguration and updateAccount
+    let res = c.post(format!("{}/v1/configuration/+123/settings", h.base_url))
+        .json(&serde_json::json!({"read_receipts": true, "typingIndicators": false, "deviceName": "Six", "numberSharing": false}))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 204);
+    {
+        let calls = h.captured_rpc_calls.lock().await;
+        let conf = calls.iter().find(|c| c["method"] == "updateConfiguration").expect("updateConfiguration called");
+        assert_eq!(param_keys(conf), vec!["account", "readReceipts", "typingIndicators"]);
+        let acct = calls.iter().find(|c| c["method"] == "updateAccount").expect("updateAccount called");
+        assert_eq!(param_keys(acct), vec!["account", "deviceName", "numberSharing"]);
+    }
+    let got = assert_get(&h.base_url, "/v1/configuration/+123/settings", 200).await.unwrap();
+    assert_eq!(got["readReceipts"], true);
+    assert_eq!(got["typingIndicators"], false);
+    assert_eq!(got["deviceName"], "Six");
+    // a later partial update merges; other accounts are separate
+    c.post(format!("{}/v1/configuration/+123/settings", h.base_url)).json(&serde_json::json!({"typingIndicators": true})).send().await.unwrap();
+    let got = assert_get(&h.base_url, "/v1/configuration/+123/settings", 200).await.unwrap();
+    assert_eq!(got["typingIndicators"], true);
+    assert_eq!(got["readReceipts"], true);
+    assert_eq!(assert_get(&h.base_url, "/v1/configuration/+999/settings", 200).await.unwrap(), serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn test_account_settings_unknown_setting_is_a_clear_400() {
+    let base = setup().await;
+    let c = reqwest::Client::new();
+    let res = c.post(format!("{base}/v1/configuration/+123/settings")).json(&serde_json::json!({"trustMode": "always", "readReceipts": true})).send().await.unwrap();
+    assert_eq!(res.status(), 400);
+    let body: serde_json::Value = res.json().await.unwrap();
+    let msg = body["error"].as_str().unwrap();
+    assert!(msg.contains("trustMode") && msg.contains("readReceipts"), "{msg}");
+    let res = c.post(format!("{base}/v1/configuration/+123/settings")).json(&serde_json::json!({})).send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_account_settings_rpc_error_is_passed_on_and_not_remembered() {
+    let h = setup_full().await;
+    let c = reqwest::Client::new();
+    let res = c.post(format!("{}/v1/configuration/+ERROR/settings", h.base_url)).json(&serde_json::json!({"readReceipts": true})).send().await.unwrap();
+    assert_eq!(res.status(), 400);
+    assert_eq!(assert_get(&h.base_url, "/v1/configuration/+ERROR/settings", 200).await.unwrap(), serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn test_global_config_reports_trust_mode_and_version_and_is_read_only() {
+    let base = setup().await;
+    let body = assert_get(&base, "/v1/configuration", 200).await.unwrap();
+    assert_eq!(body["trustMode"], "on-first-use");
+    // setting the value already in force is a no-op success; changing it is a clear 501
+    assert_json_request(&base, "POST", "/v1/configuration", serde_json::json!({"trustMode": "on-first-use"}), 204).await;
+    let res = reqwest::Client::new().post(format!("{base}/v1/configuration")).json(&serde_json::json!({"trustMode": "always"})).send().await.unwrap();
+    assert_eq!(res.status(), 501);
+    let msg: serde_json::Value = res.json().await.unwrap();
+    assert!(msg["error"].as_str().unwrap().contains("start-up"));
+}
+
+#[tokio::test]
+async fn test_group_join_needs_an_invite_link() {
+    let h = setup_full().await;
+    let c = reqwest::Client::new();
+    for path in ["/v1/groups/+123/g1/join", "/v1/groups/+123/join"] {
+        let res = c.post(format!("{}{path}", h.base_url)).send().await.unwrap();
+        assert_eq!(res.status(), 400, "{path} without a link");
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert!(body["error"].as_str().unwrap().contains("uri"));
+    }
+    let res = c.post(format!("{}/v1/groups/+123/join", h.base_url)).json(&serde_json::json!({"uri": "https://signal.group/#abc"})).send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let res = c.post(format!("{}/v1/groups/+123/g1/join", h.base_url)).json(&serde_json::json!({"uri": "https://signal.group/#abc"})).send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let calls = h.captured_rpc_calls.lock().await;
+    let joins: Vec<_> = calls.iter().filter(|c| c["method"] == "joinGroup").collect();
+    assert_eq!(joins.len(), 2, "no joinGroup call for the two requests without a link");
+    assert!(joins.iter().all(|c| param_keys(c) == vec!["account", "uri"]));
+}
+
+#[tokio::test]
+async fn test_receipts_drop_group_id_and_qrcodelink_name_is_applied_at_finish() {
+    let h = setup_full().await;
+    let c = reqwest::Client::new();
+    c.post(format!("{}/v1/receipts/+123", h.base_url))
+        .json(&serde_json::json!({"receipt_type": "read", "recipient": "+9999", "timestamp": 12345, "group-id": "g1"}))
+        .send().await.unwrap();
+    // startLink takes no params; the requested name is kept and sent to finishLink for that same URI
+    let link: serde_json::Value = c.get(format!("{}/v1/qrcodelink?device_name=Six", h.base_url)).send().await.unwrap().json().await.unwrap();
+    let uri = link["deviceLinkUri"].as_str().or_else(|| link.as_str()).unwrap_or("sgnl://linkdevice?uuid=test&pub_key=abc").to_string();
+    let res = c.post(format!("{}/v1/devices/+123", h.base_url)).json(&serde_json::json!({"uri": uri})).send().await.unwrap();
+    assert_eq!(res.status(), 204);
+    let calls = h.captured_rpc_calls.lock().await;
+    let receipt = calls.iter().find(|c| c["method"] == "sendReceipt").unwrap();
+    assert!(!param_keys(receipt).iter().any(|k| k.contains("group")), "{:?}", param_keys(receipt));
+    let start = calls.iter().find(|c| c["method"] == "startLink").unwrap();
+    assert!(param_keys(start).is_empty(), "startLink gets no parameters: {:?}", param_keys(start));
+}
+
+fn param_keys(call: &serde_json::Value) -> Vec<String> {
+    let mut k: Vec<String> = call["params"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+    k.sort();
+    k
 }

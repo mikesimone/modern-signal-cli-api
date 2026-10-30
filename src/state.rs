@@ -83,6 +83,10 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub webhooks: Arc<RwLock<Vec<WebhookConfig>>>,
     pub rpc_timeout: Duration,
+    /// signal-cli's data directory (attachments live under it; also where we remember write-only settings).
+    pub data_dir: std::path::PathBuf,
+    /// device name asked for on /v1/qrcodelink, by link URI, applied when the link is finished.
+    pub link_names: Arc<DashMap<String, String>>,
 }
 
 /// Sentinel error string returned when an RPC call times out.
@@ -114,6 +118,8 @@ impl AppState {
             // response, so a too-short timeout produces spurious 504s for
             // sends that actually succeed. httpx client-side timeout is 180s.
             rpc_timeout: Duration::from_secs(120),
+            data_dir: crate::native::default_data_dir(),
+            link_names: Arc::new(DashMap::new()),
         }
     }
 

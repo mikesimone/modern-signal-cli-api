@@ -27,6 +27,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/v1/groups/{number}/{groupid}/avatar", get(get_avatar))
         .route("/v1/groups/{number}/{groupid}/join", post(join_group))
+        .route("/v1/groups/{number}/join", post(join_group_by_link))
         .route("/v1/groups/{number}/{groupid}/quit", post(quit_group))
         .route("/v1/groups/{number}/{groupid}/block", post(block_group))
         .route(
@@ -222,11 +223,38 @@ async fn get_avatar(
     rpc_ok(&st, "getAvatar", json!({ "account": number, "group-id": groupid })).await
 }
 
+/// POST /v1/groups/{number}/{group}/join - body `{"uri": "https://signal.group/#..."}`.
+/// signal-cli can only join through a group invite link (joinGroup takes `uri`, not a group id), so the link is
+/// required; the `{group}` path segment is kept for compatibility and not used.
 async fn join_group(
     State(st): State<AppState>,
-    Path((number, groupid)): Path<(String, String)>,
+    Path((number, _groupid)): Path<(String, String)>,
+    body: axum::body::Bytes,
 ) -> Response {
-    rpc_ok(&st, "joinGroup", json!({ "account": number, "group-id": groupid })).await
+    join_with_body(&st, &number, &body).await
+}
+
+/// POST /v1/groups/{number}/join - same, without the unused group path segment.
+async fn join_group_by_link(
+    State(st): State<AppState>,
+    Path(number): Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    join_with_body(&st, &number, &body).await
+}
+
+async fn join_with_body(st: &AppState, number: &str, body: &[u8]) -> Response {
+    let uri = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("uri").and_then(|u| u.as_str()).map(str::to_owned));
+    match uri {
+        Some(uri) if !uri.is_empty() => rpc_ok(st, "joinGroup", json!({ "account": number, "uri": uri })).await,
+        _ => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "signal-cli can only join a group through its invite link: send {\"uri\": \"https://signal.group/#...\"}" })),
+        )
+            .into_response(),
+    }
 }
 
 async fn quit_group(

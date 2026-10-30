@@ -31,28 +31,41 @@ struct QrLinkQuery {
     device_name: Option<String>,
 }
 
+/// Remember the device name asked for on the QR/link request: signal-cli's startLink takes no parameters (the
+/// name is given later, to finishLink), so we keep it here, keyed by the link URI, until POST /v1/devices/{number}.
+fn remember_device_name(st: &AppState, result: &serde_json::Value, name: Option<String>) {
+    let uri = result
+        .as_str()
+        .or_else(|| result.get("deviceLinkUri").and_then(|v| v.as_str()));
+    if let (Some(uri), Some(name)) = (uri, name) {
+        st.link_names.insert(uri.to_string(), name);
+    }
+}
+
 async fn qrcodelink(
     axum::extract::Query(query): axum::extract::Query<QrLinkQuery>,
     State(st): State<AppState>,
 ) -> Response {
-    let mut params = json!({});
-    if let Some(name) = query.device_name {
-        params["deviceName"] = json!(name);
+    match st.rpc("startLink", json!({})).await {
+        Ok(result) => {
+            remember_device_name(&st, &result, query.device_name);
+            Json(result).into_response()
+        }
+        Err(e) => {
+            let status = crate::state::rpc_error_status(&e);
+            (status, Json(json!({ "error": e }))).into_response()
+        }
     }
-    rpc_ok(&st, "startLink", params).await
 }
 
 async fn qrcodelink_raw(
     axum::extract::Query(query): axum::extract::Query<QrLinkQuery>,
     State(st): State<AppState>,
 ) -> Response {
-    let mut params = json!({});
-    if let Some(name) = query.device_name {
-        params["deviceName"] = json!(name);
-    }
     // Special case: returns plain text, not JSON
-    match st.rpc("startLink", params).await {
+    match st.rpc("startLink", json!({})).await {
         Ok(result) => {
+            remember_device_name(&st, &result, query.device_name);
             let uri = result
                 .as_str()
                 .or_else(|| result.get("deviceLinkUri").and_then(|v| v.as_str()))
@@ -86,7 +99,11 @@ async fn link_device(
     Json(body): Json<LinkDeviceBody>,
 ) -> Response {
     let mut params = json!({ "deviceLinkUri": body.uri });
-    if let Some(name) = body.device_name {
+    // The name given here wins; else the one asked for on /v1/qrcodelink for this same link URI.
+    let name = body
+        .device_name
+        .or_else(|| st.link_names.remove(&body.uri).map(|(_, n)| n));
+    if let Some(name) = name {
         params["deviceName"] = json!(name);
     }
     rpc_no_content(&st, "finishLink", params).await

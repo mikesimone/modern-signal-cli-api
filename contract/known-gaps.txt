@@ -2,20 +2,15 @@
 # One `method` (signal-cli has no such method) or `method:param` (param is silently ignored/rejected) per line.
 # check.py fails on anything NOT listed here, and on entries here that no longer occur - so this can only shrink.
 
-# --- routes with no signal-cli equivalent: they always return an error ---
+# --- routes with no signal-cli equivalent yet. Each one probes signal-cli first, gets "Method not implemented" and
+#     falls back to a built-in implementation (src/native.rs). When a newer signal-cli adds one of these methods
+#     the entry goes stale and this check fails: review that the route's params match, then delete the entry. ---
 deleteAttachment
 listAttachments
 getConfiguration
 setConfiguration
 getAccountSettings
 setAccountSettings
-
-# --- joinGroup needs a group invite `uri`; the route has only a group id, so it cannot work ---
-joinGroup:group-id
-
-# --- sendReceipt has no group parameter in signal-cli (receipts go to a recipient); a `group-id` in the body is ignored.
-#     (Legacy reaction/receipt/remote-delete body names are translated to signal-cli's - see helpers.rs.) ---
-sendReceipt:group-id
 
 # --- /v2/send is a deliberate pure passthrough: these fields come from the tests, which check that unknown or
 #     bbernhard-style fields are forwarded verbatim. They are not what our code generates. ---
@@ -25,7 +20,3 @@ send:quote_timestamp
 send:quote_author
 send:quote_message
 send:somethingSignalCliMightAddTomorrow
-
-# --- signal-cli's startLink takes no params (the device name is given later, to finishLink): the qrcodelink
-#     route's device_name is accepted for compatibility but has no effect ---
-startLink:deviceName

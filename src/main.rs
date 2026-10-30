@@ -3,6 +3,7 @@
 mod daemon;
 mod jsonrpc;
 mod middleware;
+mod native;
 mod routes;
 mod state;
 mod watchdog;
