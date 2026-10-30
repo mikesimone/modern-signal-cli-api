@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::state::AppState;
-use super::helpers::{rpc_ok, rpc_created};
+use super::helpers::{rpc_ok, rpc_created, translate_legacy_params};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -156,6 +156,7 @@ async fn remote_delete(
     Json(body): Json<Value>,
 ) -> Response {
     let mut params = body;
+    translate_legacy_params(&mut params, &[("timestamp", "targetTimestamp")]);
     params["account"] = json!(number);
     rpc_ok(&st, "remoteDelete", params).await
 }

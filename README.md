@@ -230,7 +230,7 @@ INFO rpc_method="send" status=201 latency_ms=1150
 | POST | `/v2/send` | Send message (text, attachments, mentions, quotes) |
 | POST | `/v1/send` | Send message (v1, deprecated) |
 | GET | `/v1/receive/{number}` | WebSocket stream |
-| DELETE | `/v1/remote-delete/{number}` | Delete a sent message |
+| DELETE | `/v1/remote-delete/{number}` | Delete a sent message (body: `recipient`/`groupId`, `targetTimestamp`; legacy `timestamp` is translated) |
 
 ### Typing, Reactions & Receipts
 
@@ -238,9 +238,9 @@ INFO rpc_method="send" status=201 latency_ms=1150
 |--------|----------|-------------|
 | PUT | `/v1/typing-indicator/{number}` | Show typing |
 | DELETE | `/v1/typing-indicator/{number}` | Stop typing |
-| POST | `/v1/reactions/{number}` | Send reaction |
+| POST | `/v1/reactions/{number}` | Send reaction (body: `recipient`/`groupId`, `emoji`, `targetAuthor`, `targetTimestamp`; legacy `reaction`, `target_author`, `timestamp` are translated) |
 | DELETE | `/v1/reactions/{number}` | Remove reaction |
-| POST | `/v1/receipts/{number}` | Send read/delivery receipt |
+| POST | `/v1/receipts/{number}` | Send read/delivery receipt (body: `recipient`, `type`, `targetTimestamp`; legacy `receipt_type`, `timestamp` are translated) |
 
 ### Groups
 

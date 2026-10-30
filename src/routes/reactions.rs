@@ -8,7 +8,10 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::state::AppState;
-use super::helpers::{rpc_created, rpc_no_content};
+use super::helpers::{rpc_created, rpc_no_content, translate_legacy_params};
+
+/// Legacy body field -> signal-cli's real sendReaction parameter.
+const LEGACY: &[(&str, &str)] = &[("reaction", "emoji"), ("target_author", "targetAuthor"), ("timestamp", "targetTimestamp")];
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -23,6 +26,7 @@ async fn send_reaction(
     Json(body): Json<Value>,
 ) -> Response {
     let mut params = body;
+    translate_legacy_params(&mut params, LEGACY);
     params["account"] = json!(number);
     rpc_created(&st, "sendReaction", params).await
 }
@@ -40,6 +44,7 @@ async fn remove_reaction(
     Json(body): Json<Value>,
 ) -> Response {
     let mut params = body;
+    translate_legacy_params(&mut params, LEGACY);
     params["account"] = json!(number);
     params["remove"] = json!(true);
     rpc_no_content(&st, "sendReaction", params).await

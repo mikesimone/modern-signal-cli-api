@@ -4543,3 +4543,47 @@ async fn test_group_add_members_and_admins_use_signal_cli_param_names() {
     assert!(updates.iter().any(|c| c["params"]["admin"] == serde_json::json!(["+9999"])));
     assert!(updates.iter().all(|c| c["params"].get("addMember").is_none() && c["params"].get("addAdmin").is_none()));
 }
+
+// Legacy (bbernhard-style) body names are translated to the names signal-cli reads; real names pass through.
+#[tokio::test]
+async fn test_reactions_receipts_remote_delete_translate_legacy_names() {
+    let harness = setup_full().await;
+    let c = reqwest::Client::new();
+    let b = &harness.base_url;
+    let go = |method: reqwest::Method, path: String, body: serde_json::Value| {
+        let c = c.clone();
+        async move { assert!(c.request(method, path).json(&body).send().await.unwrap().status().is_success()); }
+    };
+    go(reqwest::Method::POST, format!("{b}/v1/reactions/+123"), serde_json::json!({"recipient": "+9999", "reaction": "👍", "target_author": "+9999", "timestamp": 12345})).await;
+    go(reqwest::Method::DELETE, format!("{b}/v1/reactions/+123"), serde_json::json!({"recipient": "+9999", "reaction": "👍", "target_author": "+9999", "timestamp": 12345})).await;
+    go(reqwest::Method::POST, format!("{b}/v1/receipts/+123"), serde_json::json!({"receipt_type": "read", "recipient": "+9999", "timestamp": 12345})).await;
+    go(reqwest::Method::DELETE, format!("{b}/v1/remote-delete/+123"), serde_json::json!({"recipient": "+9999", "timestamp": 12345})).await;
+    // real names, and both at once (real wins)
+    go(reqwest::Method::POST, format!("{b}/v1/reactions/+123"), serde_json::json!({"recipient": "+9999", "emoji": "🔥", "targetAuthor": "+9999", "targetTimestamp": 777, "reaction": "ignored"})).await;
+    go(reqwest::Method::DELETE, format!("{b}/v1/remote-delete/+123"), serde_json::json!({"groupId": "g1", "targetTimestamp": 4242})).await;
+
+    let calls = harness.captured_rpc_calls.lock().await;
+    let of = |m: &str| calls.iter().filter(|c| c["method"] == m).map(|c| c["params"].clone()).collect::<Vec<_>>();
+    let reactions = of("sendReaction");
+    assert_eq!(reactions[0]["emoji"], "👍");
+    assert_eq!(reactions[0]["targetAuthor"], "+9999");
+    assert_eq!(reactions[0]["targetTimestamp"], 12345);
+    assert_eq!(reactions[1]["remove"], true);
+    assert_eq!(reactions[1]["emoji"], "👍");
+    assert_eq!(reactions[2]["emoji"], "🔥", "a real name wins over a legacy one sent alongside it");
+    assert_eq!(reactions[2]["targetTimestamp"], 777);
+    for r in &reactions {
+        for legacy in ["reaction", "target_author", "timestamp"] {
+            assert!(r.get(legacy).is_none(), "legacy field {legacy} must not reach signal-cli: {r}");
+        }
+    }
+    let receipts = of("sendReceipt");
+    assert_eq!(receipts[0]["type"], "read");
+    assert_eq!(receipts[0]["targetTimestamp"], 12345);
+    assert!(receipts[0].get("receipt_type").is_none() && receipts[0].get("timestamp").is_none());
+    let deletes = of("remoteDelete");
+    assert_eq!(deletes[0]["targetTimestamp"], 12345);
+    assert!(deletes[0].get("timestamp").is_none());
+    assert_eq!(deletes[1]["targetTimestamp"], 4242);
+    assert_eq!(deletes[1]["groupId"], "g1");
+}

@@ -52,3 +52,17 @@ pub async fn rpc_no_content(st: &AppState, method: &str, params: Value) -> Respo
         }
     }
 }
+
+/// Renames legacy (bbernhard signal-cli-rest-api style) request-body fields to the names signal-cli actually
+/// reads. signal-cli silently ignores parameter names it does not know, so a body such as `{"reaction": "👍"}`
+/// used to be forwarded untouched and did nothing. Real names always win: if the caller sent both, the legacy
+/// field is dropped.
+pub fn translate_legacy_params(params: &mut Value, renames: &[(&str, &str)]) {
+    if let Some(obj) = params.as_object_mut() {
+        for (legacy, real) in renames {
+            if let Some(v) = obj.remove(*legacy) {
+                obj.entry(real.to_string()).or_insert(v);
+            }
+        }
+    }
+}

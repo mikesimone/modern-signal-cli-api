@@ -13,16 +13,9 @@ setAccountSettings
 # --- joinGroup needs a group invite `uri`; the route has only a group id, so it cannot work ---
 joinGroup:group-id
 
-# --- bbernhard-style request bodies are forwarded untouched (route = body + account), but signal-cli's names differ:
-#     reaction->emoji, target_author->targetAuthor, timestamp->targetTimestamp, receipt_type->type.
-#     Callers must send signal-cli's names until a translation layer exists (see README "Known gaps"). ---
-remoteDelete:timestamp
-sendReaction:reaction
-sendReaction:target_author
-sendReaction:timestamp
+# --- sendReceipt has no group parameter in signal-cli (receipts go to a recipient); a `group-id` in the body is ignored.
+#     (Legacy reaction/receipt/remote-delete body names are translated to signal-cli's - see helpers.rs.) ---
 sendReceipt:group-id
-sendReceipt:receipt_type
-sendReceipt:timestamp
 
 # --- /v2/send is a deliberate pure passthrough: these fields come from the tests, which check that unknown or
 #     bbernhard-style fields are forwarded verbatim. They are not what our code generates. ---
