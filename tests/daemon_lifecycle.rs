@@ -46,7 +46,7 @@ async fn drop_kills_entire_process_group() {
 
     // Use the process-group kill logic from daemon.rs
     let pid = child.id().expect("child should have a PID") as i32;
-    signal_cli_api::daemon::kill_process_group(pid);
+    modern_signal_cli_api::daemon::kill_process_group(pid);
 
     // Give time for processes to die
     tokio::time::sleep(Duration::from_millis(500)).await;

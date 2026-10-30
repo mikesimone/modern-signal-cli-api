@@ -1,3 +1,17 @@
+# Modern Signal CLI API
+
+REST, WebSocket, SSE and webhook bridge for [signal-cli](https://github.com/AsamK/signal-cli), packaged as
+**one Docker image** that pins a stock signal-cli release (see `Dockerfile`). Continuation of
+h4x0r/signal-cli-api (see `NOTICE.md`). signal-cli itself is never forked or patched; updating it is a
+version + checksum bump in the `Dockerfile`.
+
+Build: `docker build -t modern-signal-cli-api .` (reproducible from this repo alone: Rust build stage +
+checksummed signal-cli download). Run: mount a data dir at `/var/lib/signal-cli-api` and publish 8080.
+The binary is `modern-signal-cli-api`; it replaces `signal-cli-api` (same flags, same routes).
+**It has no authentication: keep port 8080 off untrusted networks.**
+
+---
+
 # signal-cli-api
 
 A native REST + WebSocket API for [signal-cli](https://github.com/AsamK/signal-cli). Build Signal bots, notification systems, and integrations in any language.

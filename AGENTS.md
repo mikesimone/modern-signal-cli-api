@@ -1,7 +1,7 @@
 # AI Project Context
 
 ## Purpose
-`signal-cli-api` is a native Rust/axum REST, streaming, webhook, and metrics wrapper around signal-cli. It is used by the Signal automation stack but is also a standalone general-purpose project.
+`modern-signal-cli-api` (Modern Signal CLI API, a continuation of h4x0r/signal-cli-api) is a native Rust/axum REST, streaming, webhook, and metrics wrapper around signal-cli. It is used by the Signal automation stack but is also a standalone general-purpose project.
 
 ## Architecture
 - Rust + axum HTTP API.
@@ -19,3 +19,7 @@
 - Keep request tracing/observability intact.
 - Do not add real Signal credentials or account state to tests or Git.
 - Run `cargo test` for behavioral changes and update docs/OpenAPI-facing behavior when endpoints or flags change.
+
+## Dependency policy (2026-10-30)
+- signal-cli is a **pinned, stock dependency**: never fork or patch it. It is downloaded by the `Dockerfile` from the official release, verified by SHA-256. Upgrading it = bump `SIGNAL_CLI_VERSION` and `SIGNAL_CLI_SHA256` together, run the tests, check route params against that release.
+- The test mock must be as strict as real signal-cli: mocks that accept any params hid the `finishLink` and `getAttachment` bugs.

@@ -245,7 +245,7 @@ async fn start_mock_signal_cli(captured: Arc<tokio::sync::Mutex<Vec<serde_json::
 struct TestHarness {
     base_url: String,
     broadcast_tx: broadcast::Sender<String>,
-    metrics: Arc<signal_cli_api::state::Metrics>,
+    metrics: Arc<modern_signal_cli_api::state::Metrics>,
     /// Every {method, params} pair the mock signal-cli received, in order.
     captured_rpc_calls: Arc<tokio::sync::Mutex<Vec<serde_json::Value>>>,
 }
@@ -259,14 +259,14 @@ async fn setup_full() -> TestHarness {
     let (reader, writer) = stream.into_split();
 
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<String>(256);
-    tokio::spawn(signal_cli_api::jsonrpc::writer_loop(writer_rx, writer));
+    tokio::spawn(modern_signal_cli_api::jsonrpc::writer_loop(writer_rx, writer));
 
-    let state = signal_cli_api::state::AppState::new(writer_tx);
+    let state = modern_signal_cli_api::state::AppState::new(writer_tx);
 
     let broadcast_tx = state.broadcast_tx.clone();
     let pending = state.pending.clone();
     let metrics = state.metrics.clone();
-    tokio::spawn(signal_cli_api::jsonrpc::reader_loop(
+    tokio::spawn(modern_signal_cli_api::jsonrpc::reader_loop(
         reader,
         broadcast_tx.clone(),
         pending,
@@ -275,9 +275,9 @@ async fn setup_full() -> TestHarness {
 
     // Spawn webhook dispatcher (mirrors main.rs)
     let webhook_state = state.clone();
-    tokio::spawn(signal_cli_api::webhooks::dispatch_loop(webhook_state));
+    tokio::spawn(modern_signal_cli_api::webhooks::dispatch_loop(webhook_state));
 
-    let app = signal_cli_api::routes::router(state).layer(CorsLayer::permissive());
+    let app = modern_signal_cli_api::routes::router(state).layer(CorsLayer::permissive());
     let listener = TokioTcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -1953,21 +1953,21 @@ async fn setup_tls() -> (String, reqwest::Client) {
     let (reader, writer) = stream.into_split();
 
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<String>(256);
-    tokio::spawn(signal_cli_api::jsonrpc::writer_loop(writer_rx, writer));
+    tokio::spawn(modern_signal_cli_api::jsonrpc::writer_loop(writer_rx, writer));
 
-    let state = signal_cli_api::state::AppState::new(writer_tx);
+    let state = modern_signal_cli_api::state::AppState::new(writer_tx);
 
     let broadcast_tx = state.broadcast_tx.clone();
     let pending = state.pending.clone();
     let metrics = state.metrics.clone();
-    tokio::spawn(signal_cli_api::jsonrpc::reader_loop(
+    tokio::spawn(modern_signal_cli_api::jsonrpc::reader_loop(
         reader,
         broadcast_tx,
         pending,
         metrics,
     ));
 
-    let app = signal_cli_api::routes::router(state);
+    let app = modern_signal_cli_api::routes::router(state);
 
     // Generate self-signed cert
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
@@ -3623,22 +3623,22 @@ async fn setup_with_timeout(timeout: std::time::Duration) -> String {
     let (reader, writer) = stream.into_split();
 
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<String>(256);
-    tokio::spawn(signal_cli_api::jsonrpc::writer_loop(writer_rx, writer));
+    tokio::spawn(modern_signal_cli_api::jsonrpc::writer_loop(writer_rx, writer));
 
-    let mut state = signal_cli_api::state::AppState::new(writer_tx);
+    let mut state = modern_signal_cli_api::state::AppState::new(writer_tx);
     state.rpc_timeout = timeout;
 
     let broadcast_tx = state.broadcast_tx.clone();
     let pending = state.pending.clone();
     let metrics = state.metrics.clone();
-    tokio::spawn(signal_cli_api::jsonrpc::reader_loop(
+    tokio::spawn(modern_signal_cli_api::jsonrpc::reader_loop(
         reader,
         broadcast_tx,
         pending,
         metrics,
     ));
 
-    let app = signal_cli_api::routes::router(state).layer(CorsLayer::permissive());
+    let app = modern_signal_cli_api::routes::router(state).layer(CorsLayer::permissive());
     let listener = TokioTcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

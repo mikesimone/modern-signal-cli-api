@@ -1,10 +1,10 @@
 [package]
-name = "signal-cli-api"
+name = "modern-signal-cli-api"
 version = "0.1.1"
 edition = "2021"
-description = "Native REST + WebSocket API bridge for signal-cli"
+description = "Modern Signal CLI API: REST + WebSocket bridge for a pinned stock signal-cli (fork of h4x0r/signal-cli-api)"
 license = "MIT"
-repository = "https://github.com/h4x0r/signal-cli-api"
+repository = "https://github.com/mikesimone/modern-signal-cli-api"
 readme = "README.md"
 keywords = ["signal", "signal-cli", "rest-api", "websocket", "bot"]
 categories = ["command-line-utilities", "web-programming::http-server"]

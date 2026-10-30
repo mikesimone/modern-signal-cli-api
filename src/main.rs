@@ -18,7 +18,7 @@ use tower_http::cors::CorsLayer;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "signal-cli-api", about = "REST + WebSocket API for signal-cli")]
+#[command(name = "modern-signal-cli-api", about = "Modern Signal CLI API: REST + WebSocket API for signal-cli")]
 struct Cli {
     /// Connect to an existing signal-cli daemon at this address.
     /// If omitted, signal-cli is auto-spawned as a child process.
