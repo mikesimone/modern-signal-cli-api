@@ -318,7 +318,7 @@ INFO rpc_method="send" status=201 latency_ms=1150
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/v1/attachments` | ⚠️ Broken - `listAttachments` isn't a real signal-cli RPC method, see `src/routes/attachments.rs` |
-| GET | `/v1/attachments/{id}` | Get attachment |
+| GET | `/v1/attachments/{id}` | Get attachment (`?account=+1555...` selects the account when several are registered) |
 | DELETE | `/v1/attachments/{id}` | ⚠️ Broken - `deleteAttachment` isn't a real signal-cli RPC method, see `src/routes/attachments.rs` |
 | GET | `/v1/search/{number}?numbers=+111,+222` | Check registration status |
 

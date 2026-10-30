@@ -1,9 +1,10 @@
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::Response,
     routing::{delete, get},
 };
+use serde::Deserialize;
 use serde_json::json;
 
 use crate::state::AppState;
@@ -26,8 +27,8 @@ pub fn routes() -> Router<AppState> {
 // product decision (e.g. maintaining our own attachment index keyed off
 // received-message envelopes) rather than a method-name correction, so it's
 // out of scope here. GET below (`getAttachment`) is the one real method in
-// this file, though note it also expects a `recipient` or `group-id` param
-// per signal-cli's `GetAttachmentCommand`, not supplied here.
+// this file; it needs only `id` plus `account` (the `?account=` query
+// param) - verified against a live 0.14.9 daemon, no recipient/group-id.
 
 /// GET /v1/attachments — BROKEN: `listAttachments` is not a real signal-cli
 /// RPC method. See note above.
@@ -35,12 +36,27 @@ async fn list_attachments(State(st): State<AppState>) -> Response {
     rpc_ok(&st, "listAttachments", json!({})).await
 }
 
-/// GET /v1/attachments/{attachment} — retrieve a specific attachment.
+#[derive(Deserialize)]
+struct GetAttachmentQuery {
+    /// Account (phone number) the attachment belongs to. signal-cli's daemon
+    /// needs this to pick a manager when more than one account is registered;
+    /// without it `getAttachment` fails with "Method requires valid account
+    /// parameter". Optional so single-account callers keep working unchanged.
+    #[serde(default)]
+    account: Option<String>,
+}
+
+/// GET /v1/attachments/{attachment}[?account=+1555...] — retrieve a specific attachment.
 async fn get_attachment(
     State(st): State<AppState>,
     Path(attachment): Path<String>,
+    Query(query): Query<GetAttachmentQuery>,
 ) -> Response {
-    rpc_ok(&st, "getAttachment", json!({ "id": attachment })).await
+    let mut params = json!({ "id": attachment });
+    if let Some(account) = query.account {
+        params["account"] = json!(account);
+    }
+    rpc_ok(&st, "getAttachment", params).await
 }
 
 /// DELETE /v1/attachments/{attachment} — BROKEN: `deleteAttachment` is not

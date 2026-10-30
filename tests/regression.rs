@@ -47,7 +47,45 @@ async fn start_mock_signal_cli(captured: Arc<tokio::sync::Mutex<Vec<serde_json::
                         || params
                             .and_then(|p| p.get("number"))
                             .and_then(|a| a.as_str())
-                            == Some("+ERROR");
+                            == Some("+ERROR")
+                        // finishLink has no account/number param; trigger its error path via the link URI
+                        || params
+                            .and_then(|p| p.get("deviceLinkUri"))
+                            .and_then(|a| a.as_str())
+                            == Some("sgnl://linkdevice?uuid=ERROR");
+                    // Real signal-cli: with several accounts registered,
+                    // getAttachment fails unless `account` is supplied.
+                    let needs_account = method == "getAttachment"
+                        && params.and_then(|p| p.get("id")).and_then(|v| v.as_str())
+                            == Some("needs-account")
+                        && params.and_then(|p| p.get("account")).is_none();
+                    // Real signal-cli's finishLink accepts only deviceLinkUri +
+                    // deviceName and rejects anything else (e.g. `account`).
+                    let bad_finish_link = method == "finishLink"
+                        && params
+                            .and_then(|p| p.as_object())
+                            .map(|o| {
+                                !o.contains_key("deviceLinkUri")
+                                    || o.keys().any(|k| k != "deviceLinkUri" && k != "deviceName")
+                            })
+                            .unwrap_or(true);
+                    if needs_account || bad_finish_link {
+                        let (code, msg) = if needs_account {
+                            (-32602, "Method requires valid account parameter")
+                        } else {
+                            (-32600, "Unrecognized field in finishLink params")
+                        };
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {"code": code, "message": msg},
+                            "id": id
+                        });
+                        let mut resp_line = serde_json::to_string(&response).unwrap();
+                        resp_line.push('\n');
+                        let _ = writer.write_all(resp_line.as_bytes()).await;
+                        let _ = writer.flush().await;
+                        continue;
+                    }
                     if is_error {
                         let response = serde_json::json!({
                             "jsonrpc": "2.0",
@@ -3913,7 +3951,7 @@ async fn test_contacts_update_rpc_error() {
 #[tokio::test]
 async fn test_devices_link_rpc_error() {
     let base = setup().await;
-    assert_json_request(&base, "POST", "/v1/devices/+ERROR", serde_json::json!({"uri": "sgnl://linkdevice?uuid=test"}), 400).await;
+    assert_json_request(&base, "POST", "/v1/devices/+123", serde_json::json!({"uri": "sgnl://linkdevice?uuid=ERROR"}), 400).await;
 }
 
 #[tokio::test]
@@ -4460,4 +4498,14 @@ async fn test_reaction_remove_uses_send_reaction_with_remove_flag() {
     let calls = harness.captured_rpc_calls.lock().await;
     assert!(calls.iter().any(|c| c["method"] == "sendReaction" && c["params"]["remove"] == true));
     assert!(!calls.iter().any(|c| c["method"] == "removeReaction"));
+}
+
+#[tokio::test]
+async fn test_attachments_get_account_query_selects_account() {
+    // Mirrors signal-cli with several accounts registered: without `account`
+    // the call is rejected, with ?account= it goes through.
+    let base = setup().await;
+    assert_get(&base, "/v1/attachments/needs-account", 400).await;
+    let body = assert_get(&base, "/v1/attachments/needs-account?account=%2B123", 200).await.unwrap();
+    assert_eq!(body["id"], "att1");
 }
