@@ -12,6 +12,13 @@ The binary is `modern-signal-cli-api`; it replaces `signal-cli-api` (same flags,
 
 ---
 
+## Staying current
+
+signal-cli is pinned in the `Dockerfile` (version + SHA-256). `.github/workflows/signal-cli-bump.yml` checks for a
+new signal-cli release every Monday, runs the full tests and the contract check against it, and only then puts the
+bump on `main`; if anything fails it opens an issue and changes nothing. `contract/bump-signal-cli.sh [version]`
+does the same edit by hand.
+
 ## Contract tests
 
 The test-suite talks to a *fake* signal-cli, which accepts anything. `contract/run.sh` checks our routes against the
